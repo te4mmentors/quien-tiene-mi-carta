@@ -79,8 +79,10 @@ let loans = [], store = null;
 const myName = () => me?.name || "";
 
 // ---------- Almacenamiento ----------
-const FIELD = { dir: "dir", card: "card", set: "set_code", person: "person", phone: "phone", qty: "qty", value: "value", foil: "foil", due: "due", note: "note", confirmedAt: "confirmed_at", returnedAt: "returned_at", returnConfirmedAt: "return_confirmed_at", createdAt: "created_at", example: "example" };
-const fromRow = r => ({ id: r.id, dir: r.dir, card: r.card, set: r.set_code || "", person: r.person, phone: r.phone || "", qty: r.qty, value: Number(r.value) || 0, foil: !!r.foil, due: r.due || "", note: r.note || "", confirmedAt: r.confirmed_at || "", returnedAt: r.returned_at || "", returnConfirmedAt: r.return_confirmed_at || "", createdAt: r.created_at, example: !!r.example });
+const FIELD = { dir: "dir", card: "card", set: "set_code", person: "person", phone: "phone", qty: "qty", value: "value", foil: "foil", due: "due", note: "note", confirmedAt: "confirmed_at", returnedAt: "returned_at", returnConfirmedAt: "return_confirmed_at", createdAt: "created_at", example: "example", scryfallId: "scryfall_id", image: "image_url", photo: "photo_path" };
+const fromRow = r => ({ id: r.id, dir: r.dir, card: r.card, set: r.set_code || "", person: r.person, phone: r.phone || "", qty: r.qty, value: Number(r.value) || 0, foil: !!r.foil, due: r.due || "", note: r.note || "", confirmedAt: r.confirmed_at || "", returnedAt: r.returned_at || "", returnConfirmedAt: r.return_confirmed_at || "", createdAt: r.created_at, example: !!r.example, scryfallId: r.scryfall_id || "", image: r.image_url || "", photo: r.photo_path || "" });
+const PHOTO_BUCKET = "card-photos";
+const photoUrl = p => !p ? "" : /^(data:|https?:)/.test(p) ? p : `${CFG.SUPABASE_URL}/storage/v1/object/public/${PHOTO_BUCKET}/${p.split("/").map(encodeURIComponent).join("/")}`;
 const toRow = d => { const o = {}; for (const k in d) if (FIELD[k]) { let v = d[k]; if ((k === "due" || k.endsWith("At")) && v === "") v = null; o[FIELD[k]] = v; } return o; };
 
 function cloudStore() {
@@ -90,7 +92,13 @@ function cloudStore() {
     async add(d) { const { data, error } = await T("loans").insert(toRow(d)).select().single(); if (error) throw error; loans.push(fromRow(data)); render(); return data.id; },
     async update(id, p) { const { error } = await T("loans").update(toRow(p)).eq("id", id); if (error) throw error; loans = loans.map(l => l.id === id ? { ...l, ...p } : l); render(); },
     async remove(id) { const { error } = await T("loans").delete().eq("id", id); if (error) throw error; loans = loans.filter(l => l.id !== id); render(); },
-    async token(ids, kind) { const { data, error } = await sb.rpc("create_confirmation", { p_loan_ids: ids, p_kind: kind, p_sender: myName() }); if (error) throw error; return data; }
+    async token(ids, kind) { const { data, error } = await sb.rpc("create_confirmation", { p_loan_ids: ids, p_kind: kind, p_sender: myName() }); if (error) throw error; return data; },
+    async uploadPhoto(blob) {
+      const path = `${me.id}/${(crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2))}.jpg`;
+      const { error } = await sb.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType: "image/jpeg", upsert: false });
+      if (error) throw error; return path;
+    },
+    async removePhoto(path) { if (path && path.startsWith(me.id + "/")) await sb.storage.from(PHOTO_BUCKET).remove([path]); }
   };
 }
 function localStore() {
@@ -102,7 +110,9 @@ function localStore() {
     async add(d) { const id = uid(); loans.push({ id, ...d }); write(); render(); return id; },
     async update(id, p) { loans = loans.map(l => l.id === id ? { ...l, ...p } : l); write(); render(); },
     async remove(id) { loans = loans.filter(l => l.id !== id); write(); render(); },
-    async token() { return null; } // sin servidor no hay link de confirmación
+    async token() { return null; }, // sin servidor no hay link de confirmación
+    async uploadPhoto(blob) { return await new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = bad; r.readAsDataURL(blob); }); },
+    async removePhoto() { }
   };
 }
 
@@ -274,26 +284,111 @@ $("#person").addEventListener("change", () => {
   const n = norm($("#person").value); if (!n || $("#phone").value.trim()) return;
   const prev = [...loans].reverse().find(l => norm(l.person) === n && l.phone); if (prev) $("#phone").value = prev.phone;
 });
-const cardIn = $("#card"), acList = $("#acList"); let acItems = [], acOn = -1;
-function acRender() {
-  const q = norm(cardIn.value);
-  if (!q) { acList.hidden = true; cardIn.setAttribute("aria-expanded", "false"); return; }
-  acItems = (window.CATALOG || []).filter(c => norm(c.name).includes(q)).sort((a, b) => norm(a.name).indexOf(q) - norm(b.name).indexOf(q)).slice(0, 7);
-  if (!acItems.length) { acList.hidden = true; return; }
-  acList.innerHTML = acItems.map((c, i) => `<button type="button" role="option" class="ac-item${i === acOn ? " on" : ""}" data-i="${i}"><span>${esc(c.name)}</span><span class="mono">${c.set} · ${cop.format(c.value)}</span></button>`).join("");
+// ---------- Buscador de cartas: Scryfall (todas las cartas, imagen y precio); si falla, el catálogo local ----------
+const SF = "https://api.scryfall.com", COP_PER_USD = Number(CFG.COP_PER_USD) || 3200;
+const sfCache = new Map();
+function sfGet(path) {
+  if (sfCache.has(path)) return sfCache.get(path);
+  const p = fetch(SF + path, { headers: { Accept: "application/json" } }).then(r => { if (r.status === 404) return null; if (!r.ok) throw new Error("scryfall " + r.status); return r.json(); });
+  sfCache.set(path, p); p.catch(() => sfCache.delete(path)); return p;
+}
+const sfImage = c => (c.image_uris && (c.image_uris.small || c.image_uris.normal)) || (c.card_faces && c.card_faces[0] && c.card_faces[0].image_uris && c.card_faces[0].image_uris.small) || "";
+const sfUsd = (c, foil) => { const p = c.prices || {}; const v = foil ? (p.usd_foil || p.usd_etched || p.usd) : (p.usd || p.usd_foil || p.usd_etched); return v ? Number(v) : null; };
+const toCop = usd => Math.max(1000, Math.round(usd * COP_PER_USD / 1000) * 1000);
+let prints = [], pick = null, valueTouched = false;
+
+const cardIn = $("#card"), acList = $("#acList"); let acItems = [], acOn = -1, acSource = "local", acTimer = null, acSeq = 0;
+function localMatches(q) { return (window.CATALOG || []).filter(c => norm(c.name).includes(q)).sort((a, b) => norm(a.name).indexOf(q) - norm(b.name).indexOf(q)).slice(0, 7).map(c => ({ name: c.name, set: c.set, value: c.value })); }
+function acDraw() {
+  if (!acItems.length) { acList.hidden = true; cardIn.setAttribute("aria-expanded", "false"); return; }
+  acList.innerHTML = acItems.map((c, i) => `<button type="button" role="option" class="ac-item${i === acOn ? " on" : ""}" data-i="${i}"><span class="ac-name">${esc(c.name)}</span>${c.set ? `<span class="mono">${c.set} · ${cop.format(c.value)}</span>` : ""}</button>`).join("")
+    + (acSource === "local" ? `<div class="ac-src">Sin conexión con Scryfall: mostrando cartas populares</div>` : "");
   acList.hidden = false; cardIn.setAttribute("aria-expanded", "true");
 }
-function acPick(i) { const c = acItems[i]; if (!c) return; cardIn.value = c.name; $("#set").value = c.set; $("#value").value = c.value; acList.hidden = true; acOn = -1; $("#person").focus(); }
-cardIn.addEventListener("input", () => { acOn = -1; acRender(); });
+function acRender() {
+  const raw = cardIn.value.trim(), q = norm(raw);
+  if (!q) { acItems = []; acDraw(); return; }
+  clearTimeout(acTimer);
+  if (q.length < 2) { acSource = "local"; acItems = localMatches(q); acDraw(); return; }
+  const seq = ++acSeq;
+  acTimer = setTimeout(async () => {
+    try {
+      const r = await sfGet("/cards/autocomplete?q=" + encodeURIComponent(raw));
+      if (seq !== acSeq) return;
+      acSource = "scryfall"; acItems = (r && r.data || []).slice(0, 8).map(name => ({ name }));
+      if (!acItems.length) { acSource = "local"; acItems = localMatches(q); }
+    } catch (e) { if (seq !== acSeq) return; acSource = "local"; acItems = localMatches(q); }
+    acDraw();
+  }, 220);
+}
+function clearPrint() { prints = []; pick = null; $("#printRow").hidden = true; $("#printSel").innerHTML = ""; $("#cardImg").removeAttribute("src"); $("#priceHint").textContent = ""; }
+function applyPrint() {
+  pick = prints[Number($("#printSel").value)] || null; if (!pick) return;
+  $("#set").value = (pick.set || "").toUpperCase().slice(0, 6);
+  const img = sfImage(pick); if (img) $("#cardImg").src = img; else $("#cardImg").removeAttribute("src");
+  const usd = sfUsd(pick, $("#foil").checked);
+  if (!valueTouched) $("#value").value = usd ? toCop(usd) : "";
+  $("#priceHint").textContent = usd ? `US$${usd.toFixed(2)} × ${cop.format(COP_PER_USD)} = ${cop.format(toCop(usd))} por copia${$("#foil").checked ? " (foil)" : ""}` : "Scryfall no tiene precio para esta versión";
+}
+async function loadPrints(name) {
+  clearPrint();
+  try {
+    const r = await sfGet(`/cards/search?q=${encodeURIComponent('!"' + name + '"')}&unique=prints&order=released&dir=desc`);
+    if (!r || cardIn.value.trim() !== name) return;
+    prints = (r.data || []).filter(c => !c.digital).slice(0, 60);
+    if (!prints.length) return;
+    let def = prints.findIndex(c => sfUsd(c, false)); if (def < 0) def = 0;
+    $("#printSel").innerHTML = prints.map((c, i) => { const u = sfUsd(c, $("#foil").checked); return `<option value="${i}"${i === def ? " selected" : ""}>${esc((c.set || "").toUpperCase())} · ${esc(c.set_name || "")}${c.collector_number ? " #" + esc(c.collector_number) : ""}${u ? " · " + cop.format(toCop(u)) : ""}</option>`; }).join("");
+    $("#printRow").hidden = false; applyPrint();
+  } catch (e) { /* sin Scryfall: queda el registro manual */ }
+}
+$("#printSel").addEventListener("change", () => { valueTouched = false; applyPrint(); });
+$("#foil").addEventListener("change", () => { if (pick) { valueTouched = false; applyPrint(); } });
+$("#value").addEventListener("input", () => { valueTouched = true; });
+function acPick(i) {
+  const c = acItems[i]; if (!c) return;
+  cardIn.value = c.name; acList.hidden = true; acOn = -1; valueTouched = false;
+  if (c.set) { clearPrint(); $("#set").value = c.set; $("#value").value = c.value; }
+  else loadPrints(c.name);
+  $("#person").focus();
+}
+cardIn.addEventListener("input", () => { acOn = -1; if (pick || prints.length) clearPrint(); acRender(); });
 cardIn.addEventListener("keydown", e => {
   if (acList.hidden) return;
   if (e.key === "ArrowDown") { e.preventDefault(); acOn = Math.min(acOn + 1, acItems.length - 1); acRender(); }
   else if (e.key === "ArrowUp") { e.preventDefault(); acOn = Math.max(acOn - 1, 0); acRender(); }
   else if (e.key === "Enter" && acOn >= 0) { e.preventDefault(); acPick(acOn); }
+  else if (e.key === "Enter") { acList.hidden = true; }
   else if (e.key === "Escape") { acList.hidden = true; }
 });
 acList.addEventListener("mousedown", e => { const b = e.target.closest(".ac-item"); if (b) { e.preventDefault(); acPick(Number(b.dataset.i)); } });
 cardIn.addEventListener("blur", () => setTimeout(() => acList.hidden = true, 120));
+
+// ---------- Fotos: se comprimen en el celular antes de subirlas ----------
+async function compressImage(file, max = 1280, quality = .8) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = url; });
+    const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement("canvas"); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    return await new Promise((ok, bad) => c.toBlob(b => b ? ok(b) : bad(new Error("toBlob")), "image/jpeg", quality));
+  } finally { URL.revokeObjectURL(url); }
+}
+let formPhoto = null;
+function setFormPhoto(blob) {
+  formPhoto = blob;
+  const prev = $("#photoPrev");
+  if (prev.src.startsWith("blob:")) URL.revokeObjectURL(prev.src);
+  if (blob) { prev.src = URL.createObjectURL(blob); prev.hidden = false; $("#photoClear").hidden = false; $("#photoHint").textContent = `Lista (${Math.round(blob.size / 1024)} KB). Se sube al registrar.`; }
+  else { prev.removeAttribute("src"); prev.hidden = true; $("#photoClear").hidden = true; $("#photoHint").textContent = "Sirve de evidencia de cómo estaba la carta al prestarla."; }
+}
+$("#photo").addEventListener("change", async e => {
+  const f = e.target.files && e.target.files[0]; e.target.value = ""; if (!f) return;
+  $("#photoHint").textContent = "Preparando foto…";
+  try { setFormPhoto(await compressImage(f)); } catch (x) { setFormPhoto(null); $("#photoHint").textContent = "No se pudo leer esa imagen. Prueba con otra foto."; }
+});
+$("#photoClear").addEventListener("click", () => setFormPhoto(null));
 
 $("#form").addEventListener("submit", async e => {
   e.preventDefault();
@@ -306,17 +401,23 @@ $("#form").addEventListener("submit", async e => {
     dir: side, card, set: $("#set").value.trim().toUpperCase(), person,
     qty: Math.max(1, Math.min(99, parseInt($("#qty").value) || 1)), value: Math.max(0, parseInt($("#value").value) || 0),
     foil: $("#foil").checked, phone: $("#phone").value.trim(), confirmedAt: "", due: $("#due").value || "", note: $("#note").value.trim(),
-    createdAt: new Date().toISOString(), returnedAt: ""
+    createdAt: new Date().toISOString(), returnedAt: "",
+    scryfallId: pick && pick.name === card ? pick.id : "", image: pick && pick.name === card ? sfImage(pick) : ""
   };
   const btn = $("#submitBtn"); btn.disabled = true;
   try {
+    if (formPhoto) {
+      btn.textContent = "Subiendo foto…";
+      try { data.photo = await store.uploadPhoto(formPhoto); }
+      catch (x) { err.textContent = "No se pudo subir la foto. Revisa tu conexión, o quítala para registrar sin foto."; return; }
+    }
     const nid = await store.add(data);
     const pend = loans.filter(l => dirOf(l) === side && norm(l.person) === norm(person) && !l.returnedAt && !l.confirmedAt).length;
     if (pend >= 2) { setView("persona"); openPanel = "g:" + keyOf(person); render(); toast(`Agregada. Tienes ${pend} cartas con ${person} para confirmar en un solo mensaje`); }
     else { openPanel = "c:" + nid; render(); toast(`Registrada. Puedes agregar otra carta con ${person} o enviar el mensaje`); }
-    cardIn.value = ""; $("#set").value = ""; $("#value").value = ""; $("#qty").value = 1; $("#note").value = ""; $("#foil").checked = false; cardIn.focus();
+    cardIn.value = ""; $("#set").value = ""; $("#value").value = ""; $("#qty").value = 1; $("#note").value = ""; $("#foil").checked = false; clearPrint(); valueTouched = false; setFormPhoto(null); cardIn.focus();
   } catch (x) { err.textContent = "No se pudo guardar. Revisa tu conexión e intenta de nuevo."; }
-  finally { btn.disabled = false; }
+  finally { btn.disabled = false; btn.textContent = TXT[side].submit; }
 });
 
 // ---------- Mensajes ----------
@@ -415,7 +516,7 @@ function loanRow(l, mode) {
   if (!l.returnedAt) conf = l.confirmedAt ? `<span class="cf yes">${t.cfYes} ${shortDate(l.confirmedAt)}</span>` : `<span class="cf no">${t.cfNo}</span>`;
   else if (dirOf(l) === "in") conf = l.returnConfirmedAt ? `<span class="cf yes">${esc(l.person)} confirmó que la recibió</span>` : `<span class="cf no">Falta que confirme que la recibió</span>`;
   return `<div class="loan" data-id="${id}">
-    <div class="thumb" aria-hidden="true">${esc(initials(l.card))}</div>
+    ${l.image ? `<div class="thumb has-img" aria-hidden="true"><img src="${esc(l.image)}" alt="" loading="lazy"></div>` : `<div class="thumb" aria-hidden="true">${esc(initials(l.card))}</div>`}
     <div class="loan-main">
       <span class="loan-title">${l.qty > 1 ? `<span class="mono">${l.qty}×</span> ` : ""}${title}</span>
       <div class="meta">
@@ -424,6 +525,7 @@ function loanRow(l, mode) {
         ${l.foil ? `<span class="tag">Foil</span>` : ""}
         ${conf}
         ${l.example ? `<span class="tag">Ejemplo</span>` : ""}
+        ${l.photo ? `<button type="button" class="linkbtn" data-act="photo-view">Ver foto</button>` : (!l.returnedAt ? `<button type="button" class="linkbtn" data-act="photo-add">+ Foto</button>` : "")}
       </div>
       ${l.note ? `<span class="note">${esc(l.note)}</span>` : ""}
     </div>
@@ -560,9 +662,36 @@ $("#list").addEventListener("click", async e => {
       toast(dirOf(l) === "out" ? `${n > 1 ? n + " copias de " : ""}${l.card} ${plural(n, "vuelve", "vuelven")} a tu colección` : `Registrado: devolviste ${n > 1 ? n + " " : ""}${l.card} a ${l.person}`);
     }
     else if (act === "undo") { await store.update(id, { returnedAt: "" }); toast("Préstamo reabierto"); }
-    else if (act === "del-yes") { openPanel = null; await store.remove(id); toast("Registro eliminado"); }
+    else if (act === "del-yes") { openPanel = null; await store.remove(id); dropPhoto(l.photo, id); toast("Registro eliminado"); }
+    else if (act === "photo-view") openPhoto(l);
+    else if (act === "photo-add") pickRowPhoto(id);
   } catch (x) { toast("No se pudo guardar el cambio. Intenta de nuevo."); }
 });
+
+// ---------- Ver, agregar y cambiar la foto de un préstamo ----------
+let rowPhotoFor = null, lbLoan = null;
+function dropPhoto(path, exceptId) { if (path && !loans.some(o => o.id !== exceptId && o.photo === path)) Promise.resolve(store.removePhoto(path)).catch(() => { }); }
+function pickRowPhoto(id) { rowPhotoFor = id; $("#rowPhoto").click(); }
+$("#rowPhoto").addEventListener("change", async e => {
+  const f = e.target.files && e.target.files[0]; e.target.value = "";
+  const l = loans.find(x => x.id === rowPhotoFor); if (!f || !l) return;
+  toast("Subiendo foto…");
+  try {
+    const path = await store.uploadPhoto(await compressImage(f));
+    const old = l.photo; await store.update(l.id, { photo: path }); dropPhoto(old, l.id);
+    $("#lightbox").hidden = true; toast("Foto guardada");
+  } catch (x) { toast("No se pudo subir la foto. Revisa tu conexión e intenta de nuevo."); }
+});
+function openPhoto(l) {
+  lbLoan = l; $("#lbImg").src = photoUrl(l.photo); $("#lbImg").alt = "Foto de " + l.card;
+  $("#lbCap").textContent = `${l.card}${l.set ? " · " + l.set : ""}`;
+  $("#lbChange").hidden = !!l.returnedAt || !(String(l.photo).startsWith("data:") || String(l.photo).startsWith((me && me.id) + "/"));
+  $("#lightbox").hidden = false; $("#lbClose").focus();
+}
+$("#lbClose").addEventListener("click", () => { $("#lightbox").hidden = true; });
+$("#lightbox").addEventListener("click", e => { if (e.target.id === "lightbox") $("#lightbox").hidden = true; });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#lightbox").hidden) $("#lightbox").hidden = true; });
+$("#lbChange").addEventListener("click", () => { if (lbLoan) pickRowPhoto(lbLoan.id); });
 
 // ---------- Instalar en el celular ----------
 let deferredPrompt = null;

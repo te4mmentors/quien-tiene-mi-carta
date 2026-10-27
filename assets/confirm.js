@@ -27,10 +27,12 @@
       ? `Este es tu link para ${esc(c.person || "la otra persona")}`
       : loan ? `${esc(sender)} te prestó ${one ? "esta carta" : `estas ${n} cartas`}`
         : `${esc(sender)} dice que te devolvió ${one ? "esta carta" : `estas ${n} cartas`}`;
+    const photoUrl = p => `${CFG.SUPABASE_URL}/storage/v1/object/public/card-photos/${String(p).split("/").map(encodeURIComponent).join("/")}`;
     const items = c.items.map(i => `<div class="citem">
-        <div class="thumb" aria-hidden="true">${esc(initials(i.card))}</div>
+        ${i.image ? `<div class="thumb has-img" aria-hidden="true"><img src="${esc(i.image)}" alt=""></div>` : `<div class="thumb" aria-hidden="true">${esc(initials(i.card))}</div>`}
         <div style="min-width:0"><div class="loan-title">${i.qty > 1 ? `<span class="mono">${i.qty}×</span> ` : ""}${esc(i.card)}</div>
-          <div class="meta">${i.set ? `<span class="mono">${esc(i.set)}</span>` : ""}${i.foil ? `<span class="tag">Foil</span>` : ""}${loan && i.due ? `<span>Devolver el ${fmtDate(i.due)}</span>` : ""}</div></div>
+          <div class="meta">${i.set ? `<span class="mono">${esc(i.set)}</span>` : ""}${i.foil ? `<span class="tag">Foil</span>` : ""}${loan && i.due ? `<span>Devolver el ${fmtDate(i.due)}</span>` : ""}</div>
+          ${i.photo ? `<a class="linkbtn" href="${photoUrl(i.photo)}" target="_blank" rel="noopener">Ver foto de cómo estaba la carta</a>` : ""}</div>
         <span class="price">${i.value ? cop.format(i.value * i.qty) : ""}</span></div>`).join("");
 
     let action = "";

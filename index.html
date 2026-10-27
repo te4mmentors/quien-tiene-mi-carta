@@ -91,6 +91,14 @@
         <div class="ac-list" id="acList" role="listbox" hidden></div>
       </div>
       <div class="f c2"><label for="set">Edición</label><input type="text" id="set" placeholder="MH2" maxlength="6"></div>
+      <div class="f c6 printrow" id="printRow" hidden>
+        <img id="cardImg" alt="" width="60" height="84">
+        <div class="f" style="flex:1;min-width:0">
+          <label for="printSel">Versión (precio de referencia)</label>
+          <select id="printSel"></select>
+          <span class="hint" id="priceHint"></span>
+        </div>
+      </div>
       <div class="f c3">
         <label for="person" id="personLabel">Se la presto a</label>
         <input type="text" id="person" list="people" placeholder="Nombre o apodo" maxlength="100">
@@ -112,6 +120,16 @@
       <div class="f c2"><label for="phone">WhatsApp (opcional)</label><input type="tel" id="phone" inputmode="tel" placeholder="300 123 4567" maxlength="30"></div>
       <div class="f c3"><label for="note">Nota</label><input type="text" id="note" placeholder="Ej: para el torneo del viernes en la tienda" maxlength="500"></div>
       <div class="f c1"><label>&nbsp;</label><label class="check"><input type="checkbox" id="foil"> Foil</label></div>
+      <div class="f c6">
+        <span class="flabel">Foto de la carta (opcional)</span>
+        <div class="photorow">
+          <label class="btn" for="photo">Tomar o elegir foto</label>
+          <input type="file" id="photo" accept="image/*" class="sr-only">
+          <img id="photoPrev" alt="Vista previa de la foto" hidden>
+          <button type="button" class="btn ghost" id="photoClear" hidden>Quitar foto</button>
+          <span class="hint" id="photoHint">Sirve de evidencia de cómo estaba la carta al prestarla.</span>
+        </div>
+      </div>
     </div>
     <div class="actions">
       <button class="btn primary" type="submit" id="submitBtn">Registrar préstamo</button>
@@ -134,6 +152,13 @@
 
 <div class="wrap" id="fatalView" hidden><div class="empty"><h2>No se pudo cargar la app</h2><p class="muted" id="fatalMsg"></p></div></div>
 <div class="toast" id="toast" hidden></div>
+<input type="file" id="rowPhoto" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true">
+<div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Foto de la carta">
+  <div class="lb-inner">
+    <img id="lbImg" alt="">
+    <div class="actions"><span id="lbCap" class="muted"></span><button class="btn" id="lbChange" type="button">Cambiar foto</button><button class="btn primary" id="lbClose" type="button">Cerrar</button></div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.1"></script>
 <script src="config.js"></script>
