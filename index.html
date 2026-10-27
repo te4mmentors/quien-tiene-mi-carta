@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>¿Quién tiene mi carta?</title>
+<meta name="description" content="Lleva el registro de las cartas de Magic que prestas y las que te prestan.">
+<meta name="theme-color" content="#3d3fb8">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-32.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Mi carta">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+
+<!-- ================= Login ================= -->
+<main class="wrap" id="authView" hidden>
+  <div class="auth">
+    <div class="brand"><img src="icons/icon-192.png" alt=""><span class="t">¿Quién tiene mi carta?</span></div>
+
+    <form class="panel" id="fLogin" novalidate>
+      <h1>Entrar</h1>
+      <p class="muted">Lleva la cuenta de las cartas que prestas y las que te prestan.</p>
+      <div class="f"><label for="liEmail">Email</label><input type="email" id="liEmail" autocomplete="email" required></div>
+      <div class="f"><label for="liPass">Contraseña</label><input type="password" id="liPass" autocomplete="current-password" required></div>
+      <span class="err" role="alert"></span>
+      <button class="btn primary" type="submit">Entrar</button>
+      <div class="links"><button type="button" class="linkbtn" data-go="fSignup">Crear cuenta</button><button type="button" class="linkbtn" data-go="fForgot">Olvidé mi contraseña</button></div>
+    </form>
+
+    <form class="panel" id="fSignup" novalidate hidden>
+      <h1>Crear cuenta</h1>
+      <p class="muted">Gratis. Tu nombre aparece en los mensajes que envías.</p>
+      <div class="f"><label for="suName">Tu nombre o apodo</label><input type="text" id="suName" autocomplete="nickname" maxlength="60" required></div>
+      <div class="f"><label for="suEmail">Email</label><input type="email" id="suEmail" autocomplete="email" required></div>
+      <div class="f"><label for="suPass">Contraseña (mínimo 8 caracteres)</label><input type="password" id="suPass" autocomplete="new-password" minlength="8" required></div>
+      <span class="err" role="alert"></span><span class="okmsg" role="status"></span>
+      <button class="btn primary" type="submit">Crear cuenta</button>
+      <div class="links"><button type="button" class="linkbtn" data-go="fLogin">Ya tengo cuenta</button></div>
+    </form>
+
+    <form class="panel" id="fForgot" novalidate hidden>
+      <h1>Recuperar contraseña</h1>
+      <p class="muted">Te enviamos un correo con un link para crear una contraseña nueva.</p>
+      <div class="f"><label for="fgEmail">Email</label><input type="email" id="fgEmail" autocomplete="email" required></div>
+      <span class="err" role="alert"></span><span class="okmsg" role="status"></span>
+      <button class="btn primary" type="submit">Enviar correo</button>
+      <div class="links"><button type="button" class="linkbtn" data-go="fLogin">Volver a entrar</button></div>
+    </form>
+
+    <form class="panel" id="fNewPass" novalidate hidden>
+      <h1>Nueva contraseña</h1>
+      <div class="f"><label for="npPass">Contraseña nueva (mínimo 8 caracteres)</label><input type="password" id="npPass" autocomplete="new-password" minlength="8" required></div>
+      <span class="err" role="alert"></span>
+      <button class="btn primary" type="submit">Guardar contraseña</button>
+    </form>
+  </div>
+</main>
+
+<!-- ================= App ================= -->
+<div class="wrap" id="appView" hidden>
+  <div class="topbar">
+    <div class="brand"><img src="icons/icon-192.png" alt=""><span class="t">¿Quién tiene mi carta?</span></div>
+    <div class="who"><span id="whoName"></span><button class="btn ghost" id="logout" type="button">Salir</button></div>
+  </div>
+  <div class="banner" id="demoBanner" hidden><span><b>Modo demo.</b> Los datos se guardan solo en este navegador hasta que configures Supabase (ver README).</span></div>
+  <div class="install" id="installBox" hidden><span id="installText"></span><button class="btn" id="installBtn" type="button" hidden>Instalar app</button><button class="btn ghost" id="installClose" type="button">Ahora no</button></div>
+
+  <div class="sides" role="tablist" aria-label="Lado del préstamo">
+    <button class="side" role="tab" data-side="out" aria-selected="true">
+      <span class="k">Presté</span><span class="v" id="vOut">$0</span><span class="sub" id="subOut">Nada prestado</span>
+    </button>
+    <button class="side" role="tab" data-side="in" aria-selected="false">
+      <span class="k">Me prestaron</span><span class="v" id="vIn">$0</span><span class="sub" id="subIn">Nada por devolver</span>
+    </button>
+  </div>
+
+  <form class="panel" id="form" autocomplete="off" novalidate>
+    <div class="panel-head"><h2 id="formTitle">Prestar una carta</h2><span class="hint">Valores de referencia en COP, puedes cambiarlos</span></div>
+    <div class="grid">
+      <div class="f c4 ac">
+        <label for="card">Carta</label>
+        <input type="text" id="card" placeholder="Busca: Sol Ring, Fetch, Rhystic…" role="combobox" aria-expanded="false" aria-controls="acList">
+        <div class="ac-list" id="acList" role="listbox" hidden></div>
+      </div>
+      <div class="f c2"><label for="set">Edición</label><input type="text" id="set" placeholder="MH2" maxlength="6"></div>
+      <div class="f c3">
+        <label for="person" id="personLabel">Se la presto a</label>
+        <input type="text" id="person" list="people" placeholder="Nombre o apodo" maxlength="100">
+        <datalist id="people"></datalist>
+      </div>
+      <div class="f c2"><label for="value">Valor por copia (COP)</label><input type="number" id="value" min="0" step="1000" inputmode="numeric" placeholder="0"></div>
+      <div class="f c1"><label for="qty">Copias</label><input type="number" id="qty" min="1" max="99" value="1" inputmode="numeric"></div>
+      <div class="f c4">
+        <label id="dueLabel">¿Cuándo la devuelve?</label>
+        <div class="chips" id="dueChips">
+          <button type="button" class="chip-btn" data-days="0" aria-pressed="false">Hoy (torneo)</button>
+          <button type="button" class="chip-btn" data-days="7" aria-pressed="true">1 semana</button>
+          <button type="button" class="chip-btn" data-days="14" aria-pressed="false">2 semanas</button>
+          <button type="button" class="chip-btn" data-days="30" aria-pressed="false">1 mes</button>
+          <button type="button" class="chip-btn" data-days="-1" aria-pressed="false">Sin fecha</button>
+        </div>
+      </div>
+      <div class="f c2"><label for="due">Fecha</label><input type="date" id="due"></div>
+      <div class="f c2"><label for="phone">WhatsApp (opcional)</label><input type="tel" id="phone" inputmode="tel" placeholder="300 123 4567" maxlength="30"></div>
+      <div class="f c3"><label for="note">Nota</label><input type="text" id="note" placeholder="Ej: para el torneo del viernes en la tienda" maxlength="500"></div>
+      <div class="f c1"><label>&nbsp;</label><label class="check"><input type="checkbox" id="foil"> Foil</label></div>
+    </div>
+    <div class="actions">
+      <button class="btn primary" type="submit" id="submitBtn">Registrar préstamo</button>
+      <span class="err" id="formErr" role="alert"></span>
+    </div>
+  </form>
+
+  <section style="display:flex;flex-direction:column;gap:12px">
+    <div class="panel-head">
+      <div class="tabs" role="tablist" aria-label="Vista">
+        <button class="tab" role="tab" data-view="persona" aria-selected="true">Por persona<span class="n" id="nP"></span></button>
+        <button class="tab" role="tab" data-view="carta" aria-selected="false">Por carta<span class="n" id="nC"></span></button>
+        <button class="tab" role="tab" data-view="historial" aria-selected="false">Devueltas<span class="n" id="nH"></span></button>
+      </div>
+      <button class="btn ghost" id="clearExamples" type="button" hidden>Quitar ejemplos</button>
+    </div>
+    <div id="list" style="display:flex;flex-direction:column;gap:12px"></div>
+  </section>
+</div>
+
+<div class="wrap" id="fatalView" hidden><div class="empty"><h2>No se pudo cargar la app</h2><p class="muted" id="fatalMsg"></p></div></div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="assets/catalog.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

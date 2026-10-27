@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Confirmar préstamo · ¿Quién tiene mi carta?</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#3d3fb8">
+<link rel="icon" href="icons/icon-32.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<main class="wrap">
+  <div class="cbox">
+    <div class="brand"><img src="icons/icon-192.png" alt=""><span class="t">¿Quién tiene mi carta?</span></div>
+    <div id="box" class="panel"><p class="muted">Cargando…</p></div>
+    <div class="panel" id="cta" hidden>
+      <h2>¿Tú también prestas cartas?</h2>
+      <p class="muted" style="margin:0">Lleva la cuenta de lo que prestas y lo que te prestan, con confirmación por WhatsApp. Es gratis.</p>
+      <div class="actions"><a class="btn" href="./">Crear mi cuenta</a></div>
+    </div>
+  </div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="assets/confirm.js"></script>
+</body>
+</html>
