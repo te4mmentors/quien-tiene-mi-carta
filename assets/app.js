@@ -11,8 +11,8 @@ const pad = n => String(n).padStart(2, "0");
 const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const addDays = n => { const d = new Date(); d.setDate(d.getDate() + n); return ymd(d); };
 const daysUntil = s => { const [y, m, d] = s.split("-").map(Number); const t = new Date(); t.setHours(0, 0, 0, 0); return Math.round((new Date(y, m - 1, d) - t) / 864e5); };
-const fmtDate = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("es-CO", { day: "numeric", month: "short" }); };
-const shortDate = iso => new Date(iso).toLocaleDateString("es-CO", { day: "numeric", month: "short" });
+const fmtDate = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("es-CO", { day: "numeric", month: "short" }).replace(/\.$/, ""); };
+const shortDate = iso => new Date(iso).toLocaleDateString("es-CO", { day: "numeric", month: "short" }).replace(/\.$/, "");
 const whenStr = iso => ymd(new Date(iso)) === ymd(new Date()) ? "hoy" : "el " + shortDate(iso);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const norm = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
@@ -67,6 +67,14 @@ const CONFIGURED = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && !/TU-PROYECTO
 const sb = CONFIGURED && window.supabase ? window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY) : null;
 const APP_BASE = location.origin + location.pathname.replace(/[^/]*$/, "");
 let me = null;        // { id, name, email }
+const CLAIM_KEY = "qtmc-claim";
+(function () {
+  const t = new URLSearchParams(location.search).get("claim");
+  if (!t) return;
+  try { localStorage.setItem(CLAIM_KEY, t); } catch (e) { }
+  history.replaceState(null, "", location.pathname);
+})();
+const pendingClaim = () => { try { return localStorage.getItem(CLAIM_KEY); } catch (e) { return null; } };
 let loans = [], store = null;
 const myName = () => me?.name || "";
 
@@ -116,7 +124,7 @@ function linkFor(kind, ids) {
 
 // ---------- Vistas: login / app ----------
 function show(view) { for (const v of ["authView", "appView", "fatalView"]) $("#" + v).hidden = v !== view; }
-function showForm(id) { show("authView"); for (const f of ["fLogin", "fSignup", "fForgot", "fNewPass"]) $("#" + f).hidden = f !== id; $$(".auth .err,.auth .okmsg").forEach(e => e.textContent = ""); const first = $("#" + id + " input"); if (first) first.focus(); }
+function showForm(id) { show("authView"); $("#claimNote").hidden = !pendingClaim(); for (const f of ["fLogin", "fSignup", "fForgot", "fNewPass"]) $("#" + f).hidden = f !== id; $$(".auth .err,.auth .okmsg").forEach(e => e.textContent = ""); const first = $("#" + id + " input"); if (first) first.focus(); }
 $$("[data-go]").forEach(b => b.addEventListener("click", () => showForm(b.dataset.go)));
 
 function authError(e) {
@@ -190,7 +198,18 @@ async function signedIn(session) {
   $("#whoName").textContent = me.name;
   store = cloudStore(); show("appView"); setSide(side);
   try { await store.load(); } catch (e) { toast("No se pudieron cargar tus préstamos. Revisa tu conexión."); }
+  await claimPending();
   maybeInstallHint();
+}
+async function claimPending() {
+  const t = pendingClaim(); if (!t || !sb) return;
+  try { localStorage.removeItem(CLAIM_KEY); } catch (e) { }
+  const { data, error } = await sb.rpc("claim_confirmation", { p_token: t });
+  if (error) { toast(/tuyo/.test(error.message || "") ? "Ese préstamo es tuyo: envíale el link a la otra persona." : "No se pudo guardar el préstamo del link. Ábrelo de nuevo."); return; }
+  if (!data) { toast("Ese link ya no existe."); return; }
+  try { await store.load(); } catch (e) { }
+  setView("persona"); setSide("in");
+  toast(data.added ? `Listo: ${data.added === 1 ? "la carta quedó" : data.added + " cartas quedaron"} en "Me prestaron"` : "Ese préstamo ya estaba en tu cuenta");
 }
 
 async function boot() {
