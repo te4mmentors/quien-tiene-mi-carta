@@ -133,6 +133,7 @@ function authError(e) {
   if (/email not confirmed/i.test(m)) return "Primero confirma tu correo con el link que te enviamos.";
   if (/already registered|already been registered/i.test(m)) return "Ya existe una cuenta con ese email. Entra o recupera tu contraseña.";
   if (/password/i.test(m) && /(least|short|weak|characters)/i.test(m)) return "La contraseña es muy corta o débil. Usa al menos 8 caracteres.";
+  if (/email rate limit|over_email_send_rate_limit|sending (confirmation|recovery|magic link)? ?email|email address not authorized/i.test(m)) return "No pudimos enviar el correo de confirmación (límite de correos alcanzado). Avísale a quien administra la app.";
   if (/rate limit|too many/i.test(m)) return "Demasiados intentos. Espera un minuto e intenta de nuevo.";
   if (/valid email|invalid email|email address/i.test(m)) return "Revisa el email, parece que no es válido.";
   if (/fetch|network/i.test(m)) return "Sin conexión. Revisa tu internet e intenta de nuevo.";
