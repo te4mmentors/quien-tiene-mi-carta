@@ -56,7 +56,7 @@ const TXT = {
     askHint: "Avísale que la recibiste y cuándo se la devuelves. Así queda constancia en el chat.",
     batchAsk: n => `Avisar que recibí ${n} en un mensaje`,
     batchHint: "Un solo mensaje confirmando todas las cartas que te prestó.",
-    ret: "La devolví", retGroup: "Devolver cartas", retHint: "Marca las cartas que le devolviste y mándale el mensaje para que confirme en el link que las recibió.",
+    ret: "La devolví", retGroup: "Devolver cartas", retHint: "Envíale el mensaje. Cuando confirme en el link que las recibió, aquí se marcan como devueltas solas. Si prefieres, márcalas tú ya.",
     who: "de", emptyH: "No tienes cartas de otros", emptyP: "Si alguien te presta una carta para un torneo, regístrala aquí para no olvidar devolverla."
   }
 };
@@ -230,9 +230,22 @@ async function boot() {
 }
 
 // Al volver a la app (p. ej. después de WhatsApp) se recargan los datos para ver confirmaciones nuevas
-async function refresh() { if (store && sb && me && !$("#appView").hidden) { try { await store.load(); } catch (e) { } } }
+// y avisa lo que cambió desde la última vez (confirmaciones y devoluciones hechas desde un link)
+async function refresh() {
+  if (!(store && sb && me && !$("#appView").hidden)) return;
+  const before = new Map(loans.map(l => [l.id, l]));
+  try { await store.load(); } catch (e) { return; }
+  const news = [];
+  for (const l of loans) {
+    const o = before.get(l.id); if (!o) continue;
+    if (dirOf(l) === "in" && l.returnConfirmedAt && !o.returnConfirmedAt) news.push(`${l.person} confirmó que recibió ${l.card}`);
+    else if (dirOf(l) === "out" && l.returnedAt && !o.returnedAt) news.push(`${l.card} quedó devuelta: ${l.person} te la regresó`);
+    else if (dirOf(l) === "out" && l.confirmedAt && !o.confirmedAt) news.push(`${l.person} confirmó que tiene ${l.card}`);
+  }
+  if (news.length) toast(news[0] + (news.length > 1 ? ` y ${news.length - 1} más` : ""));
+}
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refresh(); });
-setInterval(() => { if (document.visibilityState === "visible" && !openPanel) refresh(); }, 60000);
+setInterval(() => { if (document.visibilityState === "visible" && !$("#form").contains(document.activeElement)) refresh(); }, 30000);
 
 // ---------- Estado de la vista ----------
 let side = "out", view = "persona", openPanel = null, retSel = new Set(), pqVal = {};
